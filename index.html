@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>我的照片地图</title>
+  <meta name="description" content="从七牛云 places.json 加载点位与图片的高德地图页面" />
+  <!-- 高德 JS：你的 Key 已写入 -->
+  <script src="https://webapi.amap.com/maps?v=2.0&key=723e8970858641734a4d5823c8c8351b&plugin=AMap.ToolBar,AMap.Scale,AMap.Geolocation,AMap.MarkerClusterer"></script>
+  <style>
+    html,body{height:100%;margin:0}
+    #app{height:100%;display:grid;grid-template-rows:auto 1fr}
+    .topbar{display:flex;gap:.5rem;align-items:center;padding:.6rem .8rem;background:#111827;color:#fff}
+    .topbar h1{font-size:1rem;margin:0;font-weight:600}
+    .btn{appearance:none;border:0;border-radius:10px;padding:.45rem .7rem;background:#2563eb;color:#fff;cursor:pointer}
+    .btn:hover{filter:brightness(1.06)}
+    #map{position:relative;height:100%}
+    .marker-label{background:#111827d9;color:#fff;border-radius:999px;padding:.2rem .5rem;font-size:.75rem;border:1px solid #374151;white-space:nowrap}
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <h1>我的照片地图</h1>
+    <button id="fitBtn" class="btn">全览</button>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script>
+// 固定使用你在七牛云上的 JSON（使用 HTTPS 以避免混合内容）
+const DATA_URL = "https://t0tisdo66.hn-bkt.clouddn.com/places.json";
+
+async function loadJSON(url){
+  const res = await fetch(url, {cache:'no-store'});
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function createInfoContent(p){
+  const img = (p.photos && p.photos[0]) ? `<div style="margin-top:6px"><img src="${p.photos[0]}" alt="${p.title}" style="width:240px;max-width:70vw;height:160px;object-fit:cover;border-radius:8px"></div>` : '';
+  const desc = p.desc ? `<div style="margin-top:4px;color:#374151">${p.desc}</div>` : '';
+  const addr = p.address ? `<div style="margin-top:4px;color:#6b7280">${p.address}</div>` : '';
+  const uri = (p.lnglat && p.lnglat.length===2)
+    ? `https://uri.amap.com/marker?position=${p.lnglat[0]},${p.lnglat[1]}&name=${encodeURIComponent(p.title||'位置')}`
+    : null;
+  const open = uri ? `<div style="margin-top:6px"><a href="${uri}" target="_blank" rel="noreferrer">在高德中打开</a></div>` : '';
+  return `<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,PingFang SC,'Microsoft YaHei',Noto Sans CJK SC,sans-serif">
+    <div style="font-weight:600;font-size:16px">${p.title||'未命名位置'}</div>
+    ${addr}${desc}${img}${open}
+  </div>`;
+}
+
+function fitTo(map, list){
+  if(!list.length) return;
+  const bounds = new AMap.Bounds(list.reduce((acc,p)=>{
+    const [lng,lat] = p.lnglat; return [
+      [Math.min(acc[0][0], lng), Math.min(acc[0][1], lat)],
+      [Math.max(acc[1][0], lng), Math.max(acc[1][1], lat)]
+    ];
+  }, [[Infinity,Infinity],[-Infinity,-Infinity]]));
+  map.setBounds(bounds, false, [60,60,60,60]);
+}
+
+async function boot(){
+  const data = await loadJSON(DATA_URL);
+  if(!Array.isArray(data)) throw new Error('places.json 需要是数组');
+  const map = new AMap.Map('map', {
+    zoom: 12,
+    center: (data[0] && data[0].lnglat) ? data[0].lnglat : [116.397389, 39.908722],
+    mapStyle: 'amap://styles/whitesmoke'
+  });
+  map.addControl(new AMap.ToolBar());
+  map.addControl(new AMap.Scale());
+
+  const infoWindow = new AMap.InfoWindow({offset: new AMap.Pixel(0, -20)});
+  const markers = data.filter(p=>Array.isArray(p.lnglat)&&p.lnglat.length===2).map((p, idx) => {
+    const m = new AMap.Marker({ position: p.lnglat, title: p.title||'位置', anchor: 'bottom-center' });
+    m.setLabel({ direction: 'top', offset: new AMap.Pixel(0, -10), content: `<div class="marker-label">${idx+1}. ${p.title||'位置'}</div>` });
+    m.on('click', ()=>{
+      infoWindow.setContent(createInfoContent(p));
+      infoWindow.open(map, m.getPosition());
+    });
+    return m;
+  });
+  if(markers.length) {
+    map.add(markers);
+    new AMap.MarkerClusterer(map, markers, { gridSize: 80 });
+    fitTo(map, data);
+  }
+
+  document.getElementById('fitBtn').onclick = ()=> fitTo(map, data);
+}
+
+boot().catch(e=>{
+  alert('加载数据失败：' + e.message + '\n\nDATA_URL = ' + DATA_URL + '\n\n检查：\n1) 七牛地址可公开访问 (HTTPS)\n2) places.json 的 Content-Type 为 application/json\n3) 七牛 CORS 允许 GET 且 Allow Headers 含 Content-Type');
+  console.error(e);
+});
+</script>
+</body>
+</html>
