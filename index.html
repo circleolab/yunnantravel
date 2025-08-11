@@ -4,8 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>我的照片地图</title>
-  <meta name="description" content="从七牛云 places.json 加载点位与图片的高德地图页面" />
-  <!-- 高德 JS：你的 Key 已写入 -->
+  <meta name="description" content="GitHub Pages 版：同仓库加载 places.json 与 photos" />
   <script src="https://webapi.amap.com/maps?v=2.0&key=723e8970858641734a4d5823c8c8351b&plugin=AMap.ToolBar,AMap.Scale,AMap.Geolocation,AMap.MarkerClusterer"></script>
   <style>
     html,body{height:100%;margin:0}
@@ -28,8 +27,7 @@
 </div>
 
 <script>
-// 固定使用你在七牛云上的 JSON（使用 HTTPS 以避免混合内容）
-const DATA_URL = "https://t0tisdo66.hn-bkt.clouddn.com/places.json";
+const DATA_URL = './places.json';
 
 async function loadJSON(url){
   const res = await fetch(url, {cache:'no-store'});
@@ -93,7 +91,7 @@ async function boot(){
 }
 
 boot().catch(e=>{
-  alert('加载数据失败：' + e.message + '\n\nDATA_URL = ' + DATA_URL + '\n\n检查：\n1) 七牛地址可公开访问 (HTTPS)\n2) places.json 的 Content-Type 为 application/json\n3) 七牛 CORS 允许 GET 且 Allow Headers 含 Content-Type');
+  alert('加载数据失败：' + e.message);
   console.error(e);
 });
 </script>
