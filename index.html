@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>我的照片地图</title>
-  <meta name="description" content="GitHub Pages 版：同仓库加载 places.json 与 photos（带校验与缓存规避）" />
+  <meta name="description" content="GitHub Pages 版：同仓库加载 places.json 与 photos（带缓存规避、坐标校验、稳健全览、星级与分段配色）" />
+  <!-- 高德 JS：已写入你的 Key -->
   <script src="https://webapi.amap.com/maps?v=2.0&key=723e8970858641734a4d5823c8c8351b&plugin=AMap.ToolBar,AMap.Scale,AMap.Geolocation,AMap.MarkerClusterer"></script>
   <style>
     html,body{height:100%;margin:0}
@@ -13,6 +14,7 @@
     .topbar h1{font-size:1rem;margin:0;font-weight:600}
     .btn{appearance:none;border:0;border-radius:10px;padding:.45rem .7rem;background:#2563eb;color:#fff;cursor:pointer}
     .btn:hover{filter:brightness(1.06)}
+    .btn.ghost{background:#374151}
     #map{position:relative;height:100%}
     .marker-label{background:#111827d9;color:#fff;border-radius:999px;padding:.2rem .5rem;font-size:.75rem;border:1px solid #374151;white-space:nowrap}
     .toast{position:fixed;right:12px;bottom:12px;background:#111827;color:#fff;padding:.6rem .8rem;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.25);max-width:90vw;z-index:9999}
@@ -24,13 +26,24 @@
   <div class="topbar">
     <h1>我的照片地图</h1>
     <button id="fitBtn" class="btn">全览</button>
+    <button id="locateBtn" class="btn ghost">定位到我</button>
   </div>
   <div id="map"></div>
 </div>
 
 <script>
-// 统一的数据地址：同目录的 places.json，并加入时间戳避免缓存
+// 使用同目录的 places.json，并带时间戳规避缓存
 const DATA_URL = './places.json?v=' + Date.now();
+let __CURRENT_POINTS__ = [];
+let map;
+
+/**
+ * JSON 支持的额外字段（可选）：
+ *  - stars: 1~5 的整数（风景靓丽度）
+ *  - segmentColor: '#RRGGBB' 或 'red'/'green'/'blue'/'orange'/'purple'（标签底色）
+ *  - segment: 自定义分段名（当 segmentColor 未提供时，可用 'red'/'green' 作命名色）
+ * 若未提供 segment/segmentColor，将使用统一的默认颜色（深灰）。
+ */
 
 function toast(msg){
   const el = document.createElement('div');
@@ -40,11 +53,9 @@ function toast(msg){
   setTimeout(()=> el.remove(), 6000);
 }
 
-// 严格校验坐标合法性
+// 严格校验坐标
 function isValidLngLat(p){
-  return Array.isArray(p.lnglat) &&
-         p.lnglat.length === 2 &&
-         p.lnglat.every(n => typeof n === 'number' && isFinite(n));
+  return Array.isArray(p.lnglat) && p.lnglat.length===2 && p.lnglat.every(n=> typeof n==='number' && isFinite(n));
 }
 
 async function loadJSON(url){
@@ -53,28 +64,54 @@ async function loadJSON(url){
   return res.json();
 }
 
+// 获取分段颜色：优先 segmentColor，再看 segment；都没写则统一默认色
+function getSegmentColor(p){
+  if(p.segmentColor){
+    const named = { red: '#ef4444', green: '#10b981', blue: '#3b82f6', orange: '#f97316', purple: '#8b5cf6' };
+    return named[p.segmentColor] || p.segmentColor; // 支持命名色或十六进制
+  }
+  if(p.segment){
+    const map = { red: '#ef4444', green: '#10b981', blue: '#3b82f6', orange: '#f97316', purple: '#8b5cf6' };
+    if(map[p.segment]) return map[p.segment];
+  }
+  // 统一默认深灰
+  return '#111827d9';
+}
+
+// 渲染星级（1~5）
+function renderStars(p){
+  const n = Math.max(0, Math.min(5, parseInt(p.stars||0, 10) || 0));
+  const full = '★'.repeat(n), empty = '☆'.repeat(5-n);
+  return `<span style="color:#f59e0b;font-size:14px;letter-spacing:1px">${full}${empty}</span>`;
+}
+
 function createInfoContent(p){
   const img = (p.photos && p.photos[0]) ? `<div style="margin-top:6px"><img src="${p.photos[0]}" alt="${p.title||''}" style="width:240px;max-width:70vw;height:160px;object-fit:cover;border-radius:8px"></div>` : '';
   const desc = p.desc ? `<div style="margin-top:4px;color:#374151">${p.desc}</div>` : '';
   const addr = p.address ? `<div style="margin-top:4px;color:#6b7280">${p.address}</div>` : '';
+  const stars = p.stars ? `<div style="margin-top:4px">风景靓丽度：${renderStars(p)}</div>` : '';
   const open = (p.lnglat && p.lnglat.length===2)
     ? `<div style="margin-top:6px"><a href="https://uri.amap.com/marker?position=${p.lnglat[0]},${p.lnglat[1]}&name=${encodeURIComponent(p.title||'位置')}" target="_blank" rel="noreferrer">在高德中打开</a></div>`
     : '';
   return `<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,PingFang SC,'Microsoft YaHei',Noto Sans CJK SC,sans-serif">
     <div style="font-weight:600;font-size:16px">${p.title||'未命名位置'}</div>
-    ${addr}${desc}${img}${open}
+    ${addr}${desc}${stars}${img}${open}
   </div>`;
 }
 
-function fitTo(map, list){
-  if(!list.length) return;
-  const bounds = new AMap.Bounds(list.reduce((acc,p)=>{
-    const [lng,lat] = p.lnglat; return [
-      [Math.min(acc[0][0], lng), Math.min(acc[0][1], lat)],
-      [Math.max(acc[1][0], lng), Math.max(acc[1][1], lat)]
-    ];
-  }, [[Infinity,Infinity],[-Infinity,-Infinity]]));
-  map.setBounds(bounds, false, [60,60,60,60]);
+function fitTo(list){
+  if(!Array.isArray(list) || list.length===0){
+    toast('没有可全览的点位');
+    if(map) map.setZoom(11);
+    return;
+  }
+  if(list.length===1){
+    map.setZoomAndCenter(16, list[0].lnglat);
+    return;
+  }
+  // 多点：用 setFitView 让覆盖物入镜；传入临时 markers 仅用于计算
+  const tempMarkers = list.map(p => new AMap.Marker({ position: p.lnglat }));
+  map.setFitView(tempMarkers, false, [80,80,80,80], 16);
 }
 
 async function boot(){
@@ -85,18 +122,18 @@ async function boot(){
     alert('加载数据失败：' + e.message + '\n\n请检查：\n1) 本页与 places.json 是否同目录\n2) GitHub Pages 是否已部署完成');
     throw e;
   }
-
   if(!Array.isArray(data)) throw new Error('places.json 需要是数组');
-  console.log('Loaded data:', data);
 
   const invalid = data.filter(p=>!isValidLngLat(p));
   if(invalid.length){
-    console.warn('无效坐标的点位：', invalid);
-    toast('⚠️ 有 ' + invalid.length + ' 个点坐标无效，已跳过。请检查 places.json 中的 lnglat。');
+    console.warn('无效坐标：', invalid);
+    toast('⚠️ 有 ' + invalid.length + ' 个点坐标无效，已跳过。');
   }
   const list = data.filter(isValidLngLat);
+  __CURRENT_POINTS__ = list.slice();
 
-  const map = new AMap.Map('map', {
+  // 地图初始化
+  map = new AMap.Map('map', {
     zoom: 12,
     center: (list[0] && list[0].lnglat) ? list[0].lnglat : [116.397389, 39.908722],
     mapStyle: 'amap://styles/whitesmoke'
@@ -106,8 +143,13 @@ async function boot(){
 
   const infoWindow = new AMap.InfoWindow({offset: new AMap.Pixel(0, -20)});
   const markers = list.map((p, idx) => {
+    const color = getSegmentColor(p);
     const m = new AMap.Marker({ position: p.lnglat, title: p.title||'位置', anchor: 'bottom-center' });
-    m.setLabel({ direction: 'top', offset: new AMap.Pixel(0, -10), content: `<div class="marker-label">${idx+1}. ${p.title||'位置'}</div>` });
+    m.setLabel({
+      direction: 'top',
+      offset: new AMap.Pixel(0, -10),
+      content: `<div class="marker-label" style="background:${color};border-color:rgba(255,255,255,.35)">${idx+1}. ${p.title||'位置'}</div>`
+    });
     m.on('click', ()=>{
       infoWindow.setContent(createInfoContent(p));
       infoWindow.open(map, m.getPosition());
@@ -117,15 +159,31 @@ async function boot(){
   if(markers.length){
     map.add(markers);
     new AMap.MarkerClusterer(map, markers, { gridSize: 80 });
-    fitTo(map, list);
   }
 
-  document.getElementById('fitBtn').onclick = ()=> fitTo(map, list);
+  // 初次进入自动全览
+  fitTo(__CURRENT_POINTS__);
+
+  // 按钮
+  document.getElementById('fitBtn').onclick = ()=> fitTo(__CURRENT_POINTS__);
+  document.getElementById('locateBtn').onclick = ()=>{
+    const geo = new AMap.Geolocation({ enableHighAccuracy: true, timeout: 8000 });
+    geo.getCurrentPosition((status, result)=>{
+      if(status==='complete'){
+        const pos = [result.position.lng, result.position.lat];
+        map.setZoomAndCenter(15, pos);
+        const mk = new AMap.Marker({ position: pos });
+        mk.setLabel({direction:'top',offset:new AMap.Pixel(0,-10),content:'<div class="marker-label">我的位置</div>'});
+        map.add(mk);
+        setTimeout(()=> map.remove(mk), 8000);
+      } else {
+        alert('定位失败：' + (result.message||'请检查定位权限'));
+      }
+    })
+  };
 }
 
-boot().catch(e=>{
-  console.error(e);
-});
+boot().catch(console.error);
 </script>
 </body>
 </html>
