@@ -229,7 +229,7 @@
         "stars": 5,
         "segmentColor": "#D97706",
         "tags": [ "摄影", "测试" ],
-        "photos": [ "./photos/p1-1.jpg", "./photos/p1-2.jpg" ]
+        "photos": [ "./photos/p31.webp" ]
     },
     {
         "id": "p22",
@@ -273,7 +273,7 @@
         "stars": 5,
         "segmentColor": "#D97706",
         "tags": [ "摄影", "测试" ],
-        "photos": [ "./photos/p1-1.jpg", "./photos/p1-2.jpg" ]
+        "photos": [ "./photos/p32.webp" ]
     },
     {
         "id": "p26",
